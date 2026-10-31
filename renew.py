@@ -234,7 +234,8 @@ class WeirdhostAutomation:
                 if has_auth:
                     # 直接尝试访问后台
                     print(f"🌐 正在使用 Cookie 直接访问面板: {DASHBOARD_URL}")
-                    await page.goto(DASHBOARD_URL, wait_until="networkidle", timeout=60000)
+                    await page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(3) # 给予前端渲染缓冲时间
                     
                     # 检查是否被重定向回了登录页（说明 Cookie 失效了）
                     if "/auth/login" in page.url:
