@@ -316,7 +316,10 @@ class WeirdhostAutomation:
                     await page.screenshot(path="weirdhost_unexpired.png")
                 else:
                     print("📄 发现可续期窗口，寻找'연장하기'按钮...")
-                    renew_btn = page.locator('button:has-text("연장하기"), text="연장하기"').first
+                    renew_btn = page.locator('button').filter(has_text="연장하기").first
+                    if await renew_btn.count() == 0:
+                        renew_btn = page.get_by_text("연장하기").first
+                        
                     if await renew_btn.count() > 0 and await renew_btn.is_enabled():
                         await renew_btn.click()
                         print("🖱️ 点击了'연장하기'按钮")
