@@ -66,13 +66,11 @@ jobs:
 
       - name: 运行脚本 (使用 Xvfb 虚拟窗口渲染)
         env:
-          XSERVER_EMAIL: ${{ secrets.WEIRDHOST_EMAIL }}
-          XSERVER_PASSWORD: ${{ secrets.WEIRDHOST_PASSWORD }}
+          WEIRDHOST_EMAIL: ${{ secrets.WEIRDHOST_EMAIL }}
+          WEIRDHOST_PASSWORD: ${{ secrets.WEIRDHOST_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PROXY_SERVER: socks5://127.0.0.1:1080
-          PANEL_URL: ${{ secrets.PANEL_URL }}
-          SERVER_NAME: ${{ secrets.SERVER_NAME }}
         run: |
           xvfb-run --auto-servernum python renew.py
 
