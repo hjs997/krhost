@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动登录和续期脚本 - 完整 TG 通知 & 容错版
+Weirdhost 自动登录和续期脚本 - 
 """
 
 import asyncio
@@ -224,10 +224,15 @@ class WeirdhostAutomation:
                 print(f"🌐 正在访问登录页: {self.login_url}")
                 await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
 
-                # 2. 填写账号密码
-                print("📝 正在填写登录信息...")
-                await page.fill('input[type="email"], input[placeholder*="이메일"]', self.email)
-                await page.fill('input[type="password"], input[placeholder*="비밀번호"]', self.password)
+                # 2. 填写账号密码（已增强：自动等待输入框加载并兼容多种选择器）
+                print("📝 正在等待并填写登录信息...")
+                await page.wait_for_selector('input', timeout=30000)
+                
+                email_input = page.locator('input[type="email"], input[type="text"], input').first
+                await email_input.fill(self.email)
+                
+                password_input = page.locator('input[type="password"]').first
+                await password_input.fill(self.password)
                 await asyncio.sleep(1)
 
                 # 3. 点击登录按钮
@@ -266,7 +271,7 @@ class WeirdhostAutomation:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 8. 检查续期限制逻辑（“2일 후에 연장할수있어요” / 按钮不可用）
+                # 8. 检查续期限制逻辑
                 if "연장할수있어요" in body_content or "후에" in body_content:
                     print("ℹ️ 尚未到可续期时间（必须在到期 2 天以内才可以续期）")
                     self.renewal_status = "Unexpired"
