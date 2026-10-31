@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动登录和续期脚本
+Weirdhost 自动登录和续期脚本 - SPA 动态渲染修复版
 """
 
 import asyncio
@@ -220,24 +220,25 @@ class WeirdhostAutomation:
             page = await context.new_page()
 
             try:
-                # 1. 访问登录页
+                # 1. 访问登录页并等待网络空闲（加载前端 JS 渲染脚本）
                 print(f"🌐 正在访问登录页: {self.login_url}")
-                await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(self.login_url, wait_until="networkidle", timeout=60000)
 
-                # 2. 填写账号密码（已修复：排除隐藏的 CF 验证框，通过韩文占位符精准填写）
-                print("📝 正在等待并填写登录信息...")
-                await page.wait_for_selector('input:not([type="hidden"])', timeout=30000)
+                # 2. 等待动态渲染出的输入框加载完成
+                print("📝 正在等待前端 JS 渲染登录表单...")
+                await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
+                await asyncio.sleep(2)
                 
-                email_input = page.locator('input[placeholder*="이메일"]').first
+                email_input = page.locator('input[type="email"], input[type="text"]').first
                 await email_input.fill(self.email)
                 
-                password_input = page.locator('input[placeholder*="비밀번호"]').first
+                password_input = page.locator('input[type="password"]').first
                 await password_input.fill(self.password)
                 await asyncio.sleep(1)
 
                 # 3. 点击登录按钮
                 print("🖱️ 点击登录按钮...")
-                login_btn = page.locator('button:has-text("로그인"), input[type="submit"]').first
+                login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
                 await login_btn.click()
 
                 # 4. 处理登录跳转后触发的 Cloudflare 盾
