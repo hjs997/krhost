@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动登录和续期脚本
+Weirdhost 自动续期脚本 
 """
 
 import asyncio
@@ -21,6 +21,7 @@ PROXY_SERVER = os.getenv("PROXY_SERVER", "")
 WEIRDHOST_EMAIL = os.getenv("WEIRDHOST_EMAIL", "")
 WEIRDHOST_PASSWORD = os.getenv("WEIRDHOST_PASSWORD", "")
 LOGIN_URL = "https://hub.weirdhost.xyz/auth/login"
+DASHBOARD_URL = "https://hub.weirdhost.xyz/"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -191,10 +192,6 @@ class WeirdhostAutomation:
         self.renewal_status = "Unknown"
 
     async def run(self):
-        if not self.email or not self.password:
-            print("❌ 错误: 未设置 WEIRDHOST_EMAIL 或 WEIRDHOST_PASSWORD 环境变量!")
-            return False
-
         print("🚀 开始 Weirdhost 自动续期流程...")
 
         async with async_playwright() as p:
@@ -211,45 +208,79 @@ class WeirdhostAutomation:
                 ]
             )
 
-            context = await browser.new_context(
-                proxy=proxy_config,
-                viewport={"width": 1920, "height": 1080},
-                timezone_id="Asia/Seoul"
-            )
+            # 检查是否存在本地 auth.json 凭证
+            storage_path = "auth.json"
+            has_auth = os.path.exists(storage_path)
+
+            if has_auth:
+                print("📂 发现本地 auth.json 凭证，正在加载以跳过登录与 CF 登录盾...")
+                context = await browser.new_context(
+                    storage_state=storage_path,
+                    proxy=proxy_config,
+                    viewport={"width": 1920, "height": 1080},
+                    timezone_id="Asia/Seoul"
+                )
+            else:
+                print("ℹ️ 未发现 auth.json 凭证，将执行标准登录流程...")
+                context = await browser.new_context(
+                    proxy=proxy_config,
+                    viewport={"width": 1920, "height": 1080},
+                    timezone_id="Asia/Seoul"
+                )
 
             page = await context.new_page()
 
             try:
-                # 1. 访问登录页
-                print(f"🌐 正在访问登录页: {self.login_url}")
-                await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
+                if has_auth:
+                    # 直接尝试访问后台
+                    print(f"🌐 正在使用 Cookie 直接访问面板: {DASHBOARD_URL}")
+                    await page.goto(DASHBOARD_URL, wait_until="networkidle", timeout=60000)
+                    
+                    # 检查是否被重定向回了登录页（说明 Cookie 失效了）
+                    if "/auth/login" in page.url:
+                        print("⚠️ auth.json 凭证已失效或过期，重新执行自动登录...")
+                        has_auth = False
 
-                # 1.5 核心修复：处理刚打开页面时遇到的初始 Cloudflare 盾
-                print("🛡️ 检测并处理初始页面的 Cloudflare 盾...")
-                await solve_modal_turnstile(page, timeout=30)
-                await page.wait_for_load_state("networkidle")
+                if not has_auth:
+                    if not self.email or not self.password:
+                        print("❌ 错误: 未设置 WEIRDHOST_EMAIL 或 WEIRDHOST_PASSWORD 环境变量!")
+                        return False
 
-                # 2. 等待动态渲染出的输入框加载完成并填写
-                print("📝 正在等待前端 JS 渲染登录表单...")
-                await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
-                await asyncio.sleep(2)
-                
-                email_input = page.locator('input[type="email"], input[type="text"]').first
-                await email_input.fill(self.email)
-                
-                password_input = page.locator('input[type="password"]').first
-                await password_input.fill(self.password)
-                await asyncio.sleep(1)
+                    # 1. 访问登录页
+                    print(f"🌐 正在访问登录页: {self.login_url}")
+                    await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
 
-                # 3. 点击登录按钮
-                print("🖱️ 点击登录按钮...")
-                login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
-                await login_btn.click()
+                    # 1.5 处理初始页面的 CF 盾
+                    print("🛡️ 检测并处理初始页面的 Cloudflare 盾...")
+                    await solve_modal_turnstile(page, timeout=30)
+                    await page.wait_for_load_state("networkidle")
 
-                # 4. 处理登录提交后可能再次触发的 Cloudflare 盾
-                print("🛡️ 等待跳转并处理登录后的 Cloudflare 验证...")
-                await solve_modal_turnstile(page, timeout=45)
-                await page.wait_for_load_state("networkidle")
+                    # 2. 填写账号密码
+                    print("📝 正在等待前端 JS 渲染登录表单...")
+                    await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
+                    await asyncio.sleep(2)
+                    
+                    email_input = page.locator('input[type="email"], input[type="text"]').first
+                    await email_input.fill(self.email)
+                    
+                    password_input = page.locator('input[type="password"]').first
+                    await password_input.fill(self.password)
+                    await asyncio.sleep(1)
+
+                    # 3. 点击登录按钮
+                    print("🖱️ 点击登录按钮...")
+                    login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
+                    await login_btn.click()
+
+                    # 4. 处理登录提交后的 CF 盾
+                    print("🛡️ 等待跳转并处理登录后的 Cloudflare 验证...")
+                    await solve_modal_turnstile(page, timeout=45)
+                    await page.wait_for_load_state("networkidle")
+
+                    # 登录成功后，立刻保存状态到 auth.json
+                    await context.storage_state(path="auth.json")
+                    print("💾 登录状态已成功保存到 auth.json")
+
                 print(f"🔍 成功进入面板，当前 URL: {page.url}")
 
                 # 5. 点击左侧'서버'(服务器)菜单
