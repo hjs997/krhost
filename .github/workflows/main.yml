@@ -3,7 +3,7 @@ name: 🪄 Weirdhost 自动续期
 on:
   #schedule:
     #- cron: '0 0/12 * * *'  # 每 12 小时自动运行一次
-  workflow_dispatch:        # 支持手动触发
+  workflow_dispatch:          # 支持手动触发
 
 jobs:
   run:
@@ -63,6 +63,17 @@ jobs:
           delay=$((RANDOM % 120))
           echo "Random delay: ${delay}s"
           sleep $delay
+
+      - name: 🔑 写入登录凭证 (auth.json)
+        env:
+          AUTH_JSON_SECRET: ${{ secrets.AUTH_JSON }}
+        run: |
+          if [ -n "$AUTH_JSON_SECRET" ]; then
+            echo "$AUTH_JSON_SECRET" > auth.json
+            echo "✅ auth.json 写入成功"
+          else
+            echo "⚠️ 未检测到 AUTH_JSON 密钥，将尝试全新登录"
+          fi
 
       - name: 运行脚本 (使用 Xvfb 虚拟窗口渲染)
         env:
