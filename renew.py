@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动登录和续期脚本 - SPA 动态渲染修复版
+Weirdhost 自动登录和续期脚本
 """
 
 import asyncio
@@ -220,11 +220,16 @@ class WeirdhostAutomation:
             page = await context.new_page()
 
             try:
-                # 1. 访问登录页并等待网络空闲（加载前端 JS 渲染脚本）
+                # 1. 访问登录页
                 print(f"🌐 正在访问登录页: {self.login_url}")
-                await page.goto(self.login_url, wait_until="networkidle", timeout=60000)
+                await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
 
-                # 2. 等待动态渲染出的输入框加载完成
+                # 1.5 核心修复：处理刚打开页面时遇到的初始 Cloudflare 盾
+                print("🛡️ 检测并处理初始页面的 Cloudflare 盾...")
+                await solve_modal_turnstile(page, timeout=30)
+                await page.wait_for_load_state("networkidle")
+
+                # 2. 等待动态渲染出的输入框加载完成并填写
                 print("📝 正在等待前端 JS 渲染登录表单...")
                 await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
                 await asyncio.sleep(2)
@@ -241,8 +246,8 @@ class WeirdhostAutomation:
                 login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
                 await login_btn.click()
 
-                # 4. 处理登录跳转后触发的 Cloudflare 盾
-                print("🛡️ 等待跳转并处理 Cloudflare 验证...")
+                # 4. 处理登录提交后可能再次触发的 Cloudflare 盾
+                print("🛡️ 等待跳转并处理登录后的 Cloudflare 验证...")
                 await solve_modal_turnstile(page, timeout=45)
                 await page.wait_for_load_state("networkidle")
                 print(f"🔍 成功进入面板，当前 URL: {page.url}")
