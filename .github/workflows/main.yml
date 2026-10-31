@@ -1,0 +1,125 @@
+name: 🪄 Weirdhost 自动续期
+
+on:
+  #schedule:
+    #- cron: '0 0/12 * * *'  # 每 12 小时自动运行一次
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装官方 Google Chrome、Xvfb 及中日韩文字体
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget xvfb fonts-noto-cjk
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 缓存 Python 依赖
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install patchright requests
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: ⚙ 设置代理 (sing-box)
+        continue-on-error: true
+        env:
+          NODE_LINK: ${{ secrets.NODE_LINK }}
+        run: |
+          if [ -n "$NODE_LINK" ]; then
+            bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+            sleep 3
+          else
+            echo "⚠️ 未配置 NODE_LINK，使用直连模式"
+          fi
+
+      - name: 🎲 随机延迟（0-120秒）
+        run: |
+          delay=$((RANDOM % 120))
+          echo "Random delay: ${delay}s"
+          sleep $delay
+
+      - name: 运行脚本 (使用 Xvfb 虚拟窗口渲染)
+        env:
+          XSERVER_EMAIL: ${{ secrets.WEIRDHOST_EMAIL }}
+          XSERVER_PASSWORD: ${{ secrets.WEIRDHOST_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PROXY_SERVER: socks5://127.0.0.1:1080
+          PANEL_URL: ${{ secrets.PANEL_URL }}
+          SERVER_NAME: ${{ secrets.SERVER_NAME }}
+        run: |
+          xvfb-run --auto-servernum python renew.py
+
+      - name: 📸 上传运行截图 (便于排查)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: '*.png'
+
+      - name: Commit time.txt to repo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ ! -f time.txt ]; then
+            echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+          else
+            echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+          fi
+
+          git add time.txt
+
+          if git diff --cached --quiet; then
+            echo "无变化，无需提交"
+          else
+            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
+            for i in {1..5}; do
+              git pull --rebase origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }} && break
+              echo "推送冲突，第 $i 次重试中..."
+              sleep 2
+            done
+          fi
+
+      - name: 🧹 清理旧运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
