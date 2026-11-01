@@ -320,9 +320,10 @@ class WeirdhostAutomation:
                     if await renew_btn.count() == 0:
                         renew_btn = page.get_by_text("연장하기").first
                         
-                    if await renew_btn.count() > 0 and await renew_btn.is_enabled():
-                        await renew_btn.click()
-                        print("🖱️ 点击了'연장하기'按钮")
+                    if await renew_btn.count() > 0:
+                        print("📄 检测到续期按钮，准备尝试点击...")
+                        await renew_btn.click(force=True)
+                        print("🖱️ 成功点击了'연장하기'按钮！")
                         await asyncio.sleep(3)
 
                         # 处理二次确认框或 CF 盾
