@@ -22,6 +22,8 @@ WEIRDHOST_EMAIL = os.getenv("WEIRDHOST_EMAIL", "")
 WEIRDHOST_PASSWORD = os.getenv("WEIRDHOST_PASSWORD", "")
 LOGIN_URL = "https://hub.weirdhost.xyz/auth/login"
 DASHBOARD_URL = "https://hub.weirdhost.xyz/"
+# 直接指定你的服务器后台精确地址
+SERVER_DETAIL_URL = "https://hub.weirdhost.xyz/server/20b68126"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -208,7 +210,6 @@ class WeirdhostAutomation:
                 ]
             )
 
-            # 检查是否存在本地 auth.json 凭证
             storage_path = "auth.json"
             has_auth = os.path.exists(storage_path)
 
@@ -232,12 +233,10 @@ class WeirdhostAutomation:
 
             try:
                 if has_auth:
-                    # 直接尝试访问后台
                     print(f"🌐 正在使用 Cookie 直接访问面板: {DASHBOARD_URL}")
                     await page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
-                    await asyncio.sleep(3) # 给予前端渲染缓冲时间
+                    await asyncio.sleep(3)
                     
-                    # 检查是否被重定向回了登录页（说明 Cookie 失效了）
                     if "/auth/login" in page.url:
                         print("⚠️ auth.json 凭证已失效或过期，重新执行自动登录...")
                         has_auth = False
@@ -247,16 +246,13 @@ class WeirdhostAutomation:
                         print("❌ 错误: 未设置 WEIRDHOST_EMAIL 或 WEIRDHOST_PASSWORD 环境变量!")
                         return False
 
-                    # 1. 访问登录页
                     print(f"🌐 正在访问登录页: {self.login_url}")
                     await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
 
-                    # 1.5 处理初始页面的 CF 盾
                     print("🛡️ 检测并处理初始页面的 Cloudflare 盾...")
                     await solve_modal_turnstile(page, timeout=30)
                     await page.wait_for_load_state("networkidle")
 
-                    # 2. 填写账号密码
                     print("📝 正在等待前端 JS 渲染登录表单...")
                     await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
                     await asyncio.sleep(2)
@@ -268,44 +264,21 @@ class WeirdhostAutomation:
                     await password_input.fill(self.password)
                     await asyncio.sleep(1)
 
-                    # 3. 点击登录按钮
                     print("🖱️ 点击登录按钮...")
                     login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
                     await login_btn.click()
 
-                    # 4. 处理登录提交后的 CF 盾
                     print("🛡️ 等待跳转并处理登录后的 Cloudflare 验证...")
                     await solve_modal_turnstile(page, timeout=45)
                     await page.wait_for_load_state("networkidle")
 
-                    # 登录成功后，立刻保存状态到 auth.json
                     await context.storage_state(path="auth.json")
                     print("💾 登录状态已成功保存到 auth.json")
 
-                print(f"🔍 成功进入面板，当前 URL: {page.url}")
-
-                # 5 & 6. 强力直达：直接搜寻并点击指向 /server/ 的控制面板链接
-                print("🔍 正在寻找并进入服务器控制面板...")
-                try:
-                    # 等待 React 渲染出服务器链接
-                    await page.wait_for_selector('a[href*="/server/"]', timeout=15000)
-                    server_link = page.locator('a[href*="/server/"]').first
-                    await server_link.click(force=True)
-                    print("🖱️ 已点击服务器链接，等待页面跳转到控制面板...")
-                    # 强力等待 URL 真正变成 /server/xxxxxx
-                    await page.wait_for_url("**/server/*", timeout=15000)
-                    await asyncio.sleep(3)
-                except Exception as e:
-                    print(f"⚠️ 自动寻找服务器链接超时，尝试通过菜单进入: {e}")
-                    server_menu = page.get_by_text("서버", exact=True).first
-                    if await server_menu.count() > 0:
-                        await server_menu.click()
-                        await asyncio.sleep(2)
-                    server_item = page.locator('text="나의 무료 서버"').first
-                    if await server_item.count() > 0:
-                        await server_item.click()
-                        await asyncio.sleep(3)
-
+                # 直接通过精准 URL 导航到服务器控制面板，告别菜单点击超时与误判
+                print(f"🌐 正在直接跳转到服务器控制面板: {SERVER_DETAIL_URL}")
+                await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(4)
                 print(f"✅ 成功到达服务器控制面板，当前 URL: {page.url}")
 
                 # 7. 读取到期时间
@@ -315,46 +288,40 @@ class WeirdhostAutomation:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 8. 检查续期限制逻辑与按钮点击（确保此时已在真正的服务器详情页）
-                if "연장할수있어요" in body_content and "후에" in body_content:
-                    print("ℹ️ 尚未到可续期时间（必须在到期 2 天以内才可以续期）")
+                # 8. 寻找并点击 '연장하기' 按钮
+                print("📄 正在等待并寻找 '연장하기' 按钮渲染...")
+                
+                renew_btn = None
+                for _ in range(15):
+                    renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
+                    if await renew_btn.count() > 0 and await renew_btn.is_visible():
+                        break
+                    await asyncio.sleep(1)
+
+                if renew_btn and await renew_btn.count() > 0:
+                    print("📄 检测到续期按钮，准备尝试点击...")
+                    await renew_btn.scroll_into_view_if_needed()
+                    await renew_btn.click(force=True)
+                    print("🖱️ 成功点击了 '연장하기' 按钮！")
+                    await asyncio.sleep(3)
+
+                    # 处理二次确认框或 CF 盾
+                    await solve_modal_turnstile(page, timeout=20)
+                    
+                    confirm_btn = page.locator('button:has-text("확인"), button:has-text("연장"), div:has-text("확인"), a:has-text("확인")').first
+                    if await confirm_btn.count() > 0:
+                        await confirm_btn.click(force=True)
+                        print("🎉 成功点击确认续期！")
+                        await asyncio.sleep(4)
+                    else:
+                        print("⚠️ 未找到二次确认弹窗的按钮，但主按钮已点击")
+
+                    self.renewal_status = "Success"
+                    await page.screenshot(path="weirdhost_success_tg.png", full_page=True)
+                else:
+                    print("ℹ️ 未找到续期按钮，可能尚未到期或不在窗口期内")
                     self.renewal_status = "Unexpired"
                     await page.screenshot(path="weirdhost_unexpired.png", full_page=True)
-                else:
-                    print("📄 发现可续期窗口，正在等待并寻找 '연장하기' 按钮渲染...")
-                    
-                    # 循环等待最高 15 秒，确保 React SPA 异步渲染完成
-                    renew_btn = None
-                    for _ in range(15):
-                        renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
-                        if await renew_btn.count() > 0 and await renew_btn.is_visible():
-                            break
-                        await asyncio.sleep(1)
-
-                    if renew_btn and await renew_btn.count() > 0:
-                        print("📄 检测到续期按钮，准备尝试点击...")
-                        await renew_btn.scroll_into_view_if_needed()
-                        await renew_btn.click(force=True)
-                        print("🖱️ 成功点击了 '연장하기' 按钮！")
-                        await asyncio.sleep(3)
-
-                        # 处理二次确认框或 CF 盾
-                        await solve_modal_turnstile(page, timeout=20)
-                        
-                        confirm_btn = page.locator('button:has-text("확인"), button:has-text("연장"), div:has-text("확인"), a:has-text("확인")').first
-                        if await confirm_btn.count() > 0:
-                            await confirm_btn.click(force=True)
-                            print("🎉 成功点击确认续期！")
-                            await asyncio.sleep(4)
-                        else:
-                            print("⚠️ 未找到二次确认弹窗的按钮，但主按钮已点击")
-
-                        self.renewal_status = "Success"
-                        await page.screenshot(path="weirdhost_success_tg.png", full_page=True)
-                    else:
-                        print("ℹ️ 未找到续期按钮，标记为 Unexpired")
-                        self.renewal_status = "Unexpired"
-                        await page.screenshot(path="weirdhost_unexpired.png", full_page=True)
 
                 self.generate_report_file()
                 self.push_telegram_notifications()
