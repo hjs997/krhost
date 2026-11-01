@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动续期脚本
+Weirdhost 自动续期脚本 (极致降指纹 + 虚拟显示器完美过盾终极版)
 """
 
 import asyncio
@@ -121,7 +121,10 @@ async def _get_turnstile_token(page):
         return None
 
 async def solve_modal_turnstile(page, timeout=60):
-    print("🛡️ 正在检测并处理 Cloudflare Turnstile 验证...")
+    print("🛡️ 正在检测并处理 Cloudflare 验证...")
+    print("⏳ 模拟人类行为：正在进行环境热身等待...")
+    await asyncio.sleep(4.5)
+
     start_time = asyncio.get_event_loop().time()
     last_click = 0
     clicks = 0
@@ -129,18 +132,22 @@ async def solve_modal_turnstile(page, timeout=60):
     while asyncio.get_event_loop().time() - start_time < timeout:
         token = await _get_turnstile_token(page)
         if token:
-            print("🎉 Cloudflare Turnstile 验证通过，成功获取 Token！")
+            print("🎉 Cloudflare 验证通过，成功获取 Token！")
             return True
 
-        if asyncio.get_event_loop().time() - last_click > 5:
+        if asyncio.get_event_loop().time() - last_click > 4:
             try:
                 clicked = False
                 for frame in page.frames:
                     if "challenges.cloudflare.com" in (frame.url or ""):
                         checkbox = frame.locator('input[type="checkbox"], label, .cb-lb').first
                         if await checkbox.count() > 0:
+                            box = await checkbox.bounding_box()
+                            if box:
+                                await page.mouse.move(box['x'] + box['width']/2, box['y'] + box['height']/2, steps=10)
+                                await asyncio.sleep(0.5)
                             await checkbox.click(timeout=2000)
-                            print(f"🖱️ 第 {clicks + 1} 次：直接点击了复选框")
+                            print(f"🖱️ 第 {clicks + 1} 次：模拟人类平滑移动并点击复选框")
                             clicked = True
                             break
 
@@ -149,18 +156,18 @@ async def solve_modal_turnstile(page, timeout=60):
                     for handle in frames_handles:
                         box = await handle.bounding_box()
                         if box and box['width'] > 10 and box['height'] > 10:
-                            x = box['x'] + random.uniform(20, 40)
-                            y = box['y'] + box['height'] / 2 + random.uniform(-5, 5)
+                            x = box['x'] + random.uniform(15, 35)
+                            y = box['y'] + box['height'] / 2 + random.uniform(-3, 3)
                             
-                            await page.mouse.move(x - 40, y + random.uniform(-10, 10))
+                            await page.mouse.move(x - 50, y + random.uniform(-15, 15), steps=15)
+                            await asyncio.sleep(0.4)
+                            await page.mouse.move(x, y, steps=5)
                             await asyncio.sleep(0.2)
-                            await page.mouse.move(x, y)
-                            await asyncio.sleep(0.1)
                             await page.mouse.down()
-                            await asyncio.sleep(0.08)
+                            await asyncio.sleep(0.12)
                             await page.mouse.up()
                             
-                            print(f"🖱️ 第 {clicks + 1} 次：通过拟人化坐标偏移点击 (x={int(x)}, y={int(y)})")
+                            print(f"🖱️ 第 {clicks + 1} 次：通过拟人化轨迹偏移点击 (x={int(x)}, y={int(y)})")
                             clicked = True
                             break
 
@@ -170,7 +177,7 @@ async def solve_modal_turnstile(page, timeout=60):
             except Exception as e:
                 print(f"⚠️ 点击尝试提示: {e}")
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(1.5)
 
     if await _get_turnstile_token(page):
         return True
@@ -198,6 +205,7 @@ class WeirdhostAutomation:
         async with async_playwright() as p:
             proxy_config = {"server": PROXY_SERVER} if PROXY_SERVER else None
 
+            # 配合 xvfb-run 开启 headless=False（伪有头模式，彻底规避无头指纹特征）
             browser = await p.chromium.launch(
                 headless=False,
                 channel="chrome",
@@ -205,28 +213,56 @@ class WeirdhostAutomation:
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--window-size=1920,1080"
+                    "--window-size=1920,1080",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-service-autorun",
+                    "--password-store=basic",
+                    "--use-mock-keychain",
+                    "--hide-scrollbars",
+                    "--mute-audio"
                 ]
             )
 
             storage_path = "auth.json"
             has_auth = os.path.exists(storage_path)
 
-            if has_auth:
-                print("📂 发现本地 auth.json 凭证，正在加载以跳过登录与 CF 登录盾...")
-                context = await browser.new_context(
-                    storage_state=storage_path,
-                    proxy=proxy_config,
-                    viewport={"width": 1920, "height": 1080},
-                    timezone_id="Asia/Seoul"
-                )
-            else:
-                print("ℹ️ 未发现 auth.json 凭证，将执行标准登录流程...")
-                context = await browser.new_context(
-                    proxy=proxy_config,
-                    viewport={"width": 1920, "height": 1080},
-                    timezone_id="Asia/Seoul"
-                )
+            context = await browser.new_context(
+                storage_state=storage_path if has_auth else None,
+                proxy=proxy_config,
+                viewport={"width": 1920, "height": 1080},
+                locale="ko-KR",
+                timezone_id="Asia/Seoul",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+
+            # 极致降指纹初始化脚本（抹除 webdriver，伪装插件、语言、Chrome 运行环境）
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.navigator.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    cSI: function() {},
+                    app: {}
+                };
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['ko-KR', 'ko', 'en-US', 'en']
+                });
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [
+                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-plugin', description: 'Portable Document Format' },
+                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                    ]
+                });
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: 'denied' }) :
+                        originalQuery(parameters)
+                );
+            """)
 
             page = await context.new_page()
 
@@ -235,11 +271,10 @@ class WeirdhostAutomation:
                     print(f"🌐 正在访问登录页: {self.login_url}")
                     await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
 
-                    print("🛡️ 检测并处理初始页面的 Cloudflare 盾...")
-                    await solve_modal_turnstile(page, timeout=30)
+                    await solve_modal_turnstile(page, timeout=40)
                     await page.wait_for_load_state("networkidle")
 
-                    print("📝 正在等待前端 JS 渲染登录表单...")
+                    print("📝 正在等待前端渲染登录表单...")
                     await page.wait_for_selector('input[type="email"], input[type="text"]', timeout=30000)
                     await asyncio.sleep(2)
                     
@@ -254,22 +289,21 @@ class WeirdhostAutomation:
                     login_btn = page.locator('button:has-text("로그인"), button[type="submit"]').first
                     await login_btn.click()
 
-                    print("🛡️ 等待跳转并处理登录后的 Cloudflare 验证...")
                     await solve_modal_turnstile(page, timeout=45)
                     await page.wait_for_load_state("networkidle")
 
                     await context.storage_state(path="auth.json")
                     print("💾 登录状态已成功保存到 auth.json")
 
-                # 1. 关键修复：先访问主页，过掉全屏 CF 盾 / 验证 Cookie 有效性
+                # 1. 访问主页
                 if has_auth:
-                    print(f"🌐 正在使用 Cookie 访问主页以通过 Cloudflare 检查: {DASHBOARD_URL}")
+                    print(f"🌐 正在使用 Cookie 访问主页: {DASHBOARD_URL}")
                     await page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(4)
                     
                     body_text = await page.inner_text("body")
                     if "Performing security verification" in body_text or "Verify you are human" in body_text:
-                        print("🛡️ 检测到主页存在 Cloudflare 全屏验证，开始自动过盾...")
+                        print("🛡️ 检测到主页存在 Cloudflare 验证，开始自动处理...")
                         await solve_modal_turnstile(page, timeout=40)
                         await page.wait_for_load_state("networkidle")
 
@@ -279,22 +313,22 @@ class WeirdhostAutomation:
 
                 if not has_auth:
                     if not self.email or not self.password:
-                        print("❌ 错误: 未设置 WEIRDHOST_EMAIL 或 WEIRDHOST_PASSWORD 环境变量!")
+                        print("❌ 错误: 未设置账号密码环境变量!")
                         return False
                     await perform_login()
 
-                # 2. 主页通关并拿到 Cookie 后，安全地直达服务器后台
+                # 2. 直达服务器后台
                 print(f"🌐 正在跳转到服务器控制面板: {SERVER_DETAIL_URL}")
                 await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(3)
 
-                # 3. 等待 React 异步加载服务器控制面板数据
-                print("⏳ 正在等待 React 异步加载服务器控制面板数据...")
+                # 3. 等待数据渲染
+                print("⏳ 正在等待 React 异步加载控制面板数据...")
                 try:
                     await page.locator("text=유통기한").wait_for(state="visible", timeout=20000)
                     print("✅ 服务器面板数据已成功渲染加载！")
                 except Exception as e:
-                    print(f"⚠️ 等待到期时间文本超时，保存调试截图 'weirdhost_debug.png': {e}")
+                    print(f"⚠️ 等待到期时间文本超时，保存截图 'weirdhost_debug.png': {e}")
                     await page.screenshot(path="weirdhost_debug.png", full_page=True)
                     raise e
 
@@ -323,7 +357,6 @@ class WeirdhostAutomation:
                     print("🖱️ 成功点击了 '연장하기' 按钮！")
                     await asyncio.sleep(3)
 
-                    # 处理二次确认框或 CF 盾
                     await solve_modal_turnstile(page, timeout=20)
                     
                     confirm_btn = page.locator('button:has-text("확인"), button:has-text("연장"), div:has-text("확인"), a:has-text("확인")').first
@@ -368,7 +401,7 @@ class WeirdhostAutomation:
                 content += f"🕡️新到期时间: `{self.new_expiry_time or 'Unknown'}`<br>\n"
             elif self.renewal_status == "Unexpired":
                 content += "📊续期结果:ℹ️Unexpired<br>\n"
-                content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+                content += f"🕛️旧导期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
             else:
                 content += "📊续期结果:❌Failed<br>\n"
                 content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
