@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动续期脚本 (极致降指纹 + 虚拟显示器完美过盾终极版)
+Weirdhost 自动续期脚本
 """
 
 import asyncio
@@ -205,7 +205,6 @@ class WeirdhostAutomation:
         async with async_playwright() as p:
             proxy_config = {"server": PROXY_SERVER} if PROXY_SERVER else None
 
-            # 配合 xvfb-run 开启 headless=False（伪有头模式，彻底规避无头指纹特征）
             browser = await p.chromium.launch(
                 headless=False,
                 channel="chrome",
@@ -237,7 +236,6 @@ class WeirdhostAutomation:
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             )
 
-            # 极致降指纹初始化脚本（抹除 webdriver，伪装插件、语言、Chrome 运行环境）
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 window.navigator.chrome = {
@@ -302,8 +300,9 @@ class WeirdhostAutomation:
                     await asyncio.sleep(4)
                     
                     body_text = await page.inner_text("body")
-                    if "Performing security verification" in body_text or "Verify you are human" in body_text:
-                        print("🛡️ 检测到主页存在 Cloudflare 验证，开始自动处理...")
+                    # 【核心修复】同时检测英文与韩语 Cloudflare 盾提示
+                    if any(k in body_text for k in ["Performing security verification", "Verify you are human", "보안 확인", "사람인지 확인"]):
+                        print("🛡️ 检测到主页存在 Cloudflare 验证（韩语/英语），开始自动处理...")
                         await solve_modal_turnstile(page, timeout=40)
                         await page.wait_for_load_state("networkidle")
 
@@ -321,6 +320,13 @@ class WeirdhostAutomation:
                 print(f"🌐 正在跳转到服务器控制面板: {SERVER_DETAIL_URL}")
                 await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(3)
+
+                # 【核心修复】检查跳转后台时是否再次触发了韩语/英文 CF 盾
+                body_text = await page.inner_text("body")
+                if any(k in body_text for k in ["Performing security verification", "Verify you are human", "보안 확인", "사람인지 확인"]):
+                    print("🛡️ 检测到跳转后台时触发了 Cloudflare 验证，开始自动处理...")
+                    await solve_modal_turnstile(page, timeout=40)
+                    await page.wait_for_load_state("networkidle")
 
                 # 3. 等待数据渲染
                 print("⏳ 正在等待 React 异步加载控制面板数据...")
@@ -401,7 +407,7 @@ class WeirdhostAutomation:
                 content += f"🕡️新到期时间: `{self.new_expiry_time or 'Unknown'}`<br>\n"
             elif self.renewal_status == "Unexpired":
                 content += "📊续期结果:ℹ️Unexpired<br>\n"
-                content += f"🕛️旧导期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
+                content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
             else:
                 content += "📊续期结果:❌Failed<br>\n"
                 content += f"🕛️旧到期时间: `{self.old_expiry_time or 'Unknown'}`<br>\n"
