@@ -199,7 +199,7 @@ class WeirdhostAutomation:
             proxy_config = {"server": PROXY_SERVER} if PROXY_SERVER else None
 
             browser = await p.chromium.launch(
-                headless=True,
+                headless=False,
                 channel="chrome",
                 args=[
                     "--no-sandbox",
