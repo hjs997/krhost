@@ -14,7 +14,7 @@ import requests
 from patchright.async_api import async_playwright
 
 # =====================================================================
-#                          配置区域
+#                        配置区域
 # =====================================================================
 
 PROXY_SERVER = os.getenv("PROXY_SERVER", "")
@@ -27,7 +27,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # =====================================================================
-#                     Telegram 推送模块
+#                      Telegram 推送模块
 # =====================================================================
 
 class TelegramNotifier:
@@ -309,36 +309,46 @@ class WeirdhostAutomation:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 8. 检查续期限制逻辑
+                # 8. 检查续期限制逻辑与按钮点击（已针对 React SPA 增强等待与匹配）
                 if "연장할수있어요" in body_content or "후에" in body_content:
                     print("ℹ️ 尚未到可续期时间（必须在到期 2 天以内才可以续期）")
                     self.renewal_status = "Unexpired"
-                    await page.screenshot(path="weirdhost_unexpired.png")
+                    await page.screenshot(path="weirdhost_unexpired.png", full_page=True)
                 else:
-                    print("📄 发现可续期窗口，寻找'연장하기'按钮...")
-                    renew_btn = page.locator('button').filter(has_text="연장하기").first
-                    if await renew_btn.count() == 0:
-                        renew_btn = page.get_by_text("연장하기").first
-                        
-                    if await renew_btn.count() > 0:
+                    print("📄 发现可续期窗口，正在等待并寻找 '연장하기' 按钮渲染...")
+                    
+                    # 循环等待最高 15 秒，确保 React SPA 异步渲染完成
+                    renew_btn = None
+                    for _ in range(15):
+                        renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
+                        if await renew_btn.count() > 0 and await renew_btn.is_visible():
+                            break
+                        await asyncio.sleep(1)
+
+                    if renew_btn and await renew_btn.count() > 0:
                         print("📄 检测到续期按钮，准备尝试点击...")
+                        await renew_btn.scroll_into_view_if_needed()
                         await renew_btn.click(force=True)
-                        print("🖱️ 成功点击了'연장하기'按钮！")
+                        print("🖱️ 成功点击了 '연장하기' 按钮！")
                         await asyncio.sleep(3)
 
                         # 处理二次确认框或 CF 盾
                         await solve_modal_turnstile(page, timeout=20)
-                        confirm_btn = page.locator('button:has-text("확인"), button:has-text("연장")').first
+                        
+                        confirm_btn = page.locator('button:has-text("확인"), button:has-text("연장"), div:has-text("확인"), a:has-text("확인")').first
                         if await confirm_btn.count() > 0:
-                            await confirm_btn.click()
+                            await confirm_btn.click(force=True)
                             print("🎉 成功点击确认续期！")
                             await asyncio.sleep(4)
+                        else:
+                            print("⚠️ 未找到二次确认弹窗的按钮，但主按钮已点击")
 
                         self.renewal_status = "Success"
-                        await page.screenshot(path="weirdhost_success_tg.png")
+                        await page.screenshot(path="weirdhost_success_tg.png", full_page=True)
                     else:
-                        print("ℹ️ 续期按钮当前不可点击，标记为 Unexpired")
+                        print("ℹ️ 未找到续期按钮，标记为 Unexpired")
                         self.renewal_status = "Unexpired"
+                        await page.screenshot(path="weirdhost_unexpired.png", full_page=True)
 
                 self.generate_report_file()
                 self.push_telegram_notifications()
