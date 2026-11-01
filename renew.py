@@ -22,7 +22,6 @@ WEIRDHOST_EMAIL = os.getenv("WEIRDHOST_EMAIL", "")
 WEIRDHOST_PASSWORD = os.getenv("WEIRDHOST_PASSWORD", "")
 LOGIN_URL = "https://hub.weirdhost.xyz/auth/login"
 DASHBOARD_URL = "https://hub.weirdhost.xyz/"
-# 直接指定你的服务器后台精确地址
 SERVER_DETAIL_URL = "https://hub.weirdhost.xyz/server/20b68126"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -275,30 +274,39 @@ class WeirdhostAutomation:
                     await context.storage_state(path="auth.json")
                     print("💾 登录状态已成功保存到 auth.json")
 
-                # 直接通过精准 URL 导航到服务器控制面板，告别菜单点击超时与误判
+                # 1. 直接跳转到服务器控制面板
                 print(f"🌐 正在直接跳转到服务器控制面板: {SERVER_DETAIL_URL}")
                 await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(4)
-                print(f"✅ 成功到达服务器控制面板，当前 URL: {page.url}")
 
-                # 7. 读取到期时间
+                # 2. 核心修复：死等 React SPA 异步加载并渲染出“유통기한”（到期时间）文本
+                print("⏳ 正在等待 React 异步加载服务器控制面板数据...")
+                try:
+                    await page.locator("text=유통기한").wait_for(state="visible", timeout=20000)
+                    print("✅ 服务器面板数据已成功渲染加载！")
+                except Exception as e:
+                    print(f"⚠️ 等待到期时间文本超时，额外缓冲 5 秒: {e}")
+                    await asyncio.sleep(5)
+
+                print(f"✅ 当前所在页面 URL: {page.url}")
+
+                # 3. 读取到期时间
                 body_content = await page.content()
                 expiry_match = re.search(r"유통기한\s*(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2})", body_content)
                 if expiry_match:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 8. 寻找并点击 '연장하기' 按钮
-                print("📄 正在等待并寻找 '연장하기' 按钮渲染...")
+                # 4. 寻找并点击 '연장하기' 按钮
+                print("📄 正在寻找 '연장하기' 按钮...")
+                renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
                 
-                renew_btn = None
-                for _ in range(15):
-                    renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
-                    if await renew_btn.count() > 0 and await renew_btn.is_visible():
-                        break
-                    await asyncio.sleep(1)
+                try:
+                    # 使用 Playwright 的 wait_for 等待按钮变成可见状态
+                    await renew_btn.wait_for(state="visible", timeout=10000)
+                except Exception:
+                    pass
 
-                if renew_btn and await renew_btn.count() > 0:
+                if await renew_btn.count() > 0 and await renew_btn.is_visible():
                     print("📄 检测到续期按钮，准备尝试点击...")
                     await renew_btn.scroll_into_view_if_needed()
                     await renew_btn.click(force=True)
