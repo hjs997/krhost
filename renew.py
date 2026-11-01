@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Weirdhost 自动续期脚本 (增强调试与自动重登录版)
+Weirdhost 自动续期脚本
 """
 
 import asyncio
@@ -231,7 +231,6 @@ class WeirdhostAutomation:
             page = await context.new_page()
 
             try:
-                # 辅助函数：执行标准账号密码登录
                 async def perform_login():
                     print(f"🌐 正在访问登录页: {self.login_url}")
                     await page.goto(self.login_url, wait_until="domcontentloaded", timeout=60000)
@@ -262,14 +261,20 @@ class WeirdhostAutomation:
                     await context.storage_state(path="auth.json")
                     print("💾 登录状态已成功保存到 auth.json")
 
+                # 1. 关键修复：先访问主页，过掉全屏 CF 盾 / 验证 Cookie 有效性
                 if has_auth:
-                    print(f"🌐 正在使用 Cookie 直接访问面板: {SERVER_DETAIL_URL}")
-                    await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
-                    await asyncio.sleep(4)
+                    print(f"🌐 正在使用 Cookie 访问主页以通过 Cloudflare 检查: {DASHBOARD_URL}")
+                    await page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(3)
+                    
+                    body_text = await page.inner_text("body")
+                    if "Performing security verification" in body_text or "Verify you are human" in body_text:
+                        print("🛡️ 检测到主页存在 Cloudflare 全屏验证，开始自动过盾...")
+                        await solve_modal_turnstile(page, timeout=40)
+                        await page.wait_for_load_state("networkidle")
 
-                    # 检查页面上是否出现了登录输入框（说明 Cookie 实际上已经失效被重定向/渲染了登录表单）
-                    if await page.locator('input[type="email"], input[type="password"]').count() > 0 or "/auth/login" in page.url:
-                        print("⚠️ 检测到本地 Cookie 已失效，自动切回账号密码登录流程...")
+                    if "/auth/login" in page.url or await page.locator('input[type="email"]').count() > 0:
+                        print("⚠️ Cookie 已失效，切换为账号密码登录...")
                         has_auth = False
 
                 if not has_auth:
@@ -277,39 +282,32 @@ class WeirdhostAutomation:
                         print("❌ 错误: 未设置 WEIRDHOST_EMAIL 或 WEIRDHOST_PASSWORD 环境变量!")
                         return False
                     await perform_login()
-                    print(f"🌐 登录成功，重新跳转到服务器控制面板: {SERVER_DETAIL_URL}")
-                    await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
 
-                # 核心：等待 React 异步加载控制面板数据
+                # 2. 主页通关并拿到 Cookie 后，安全地直达服务器后台
+                print(f"🌐 正在跳转到服务器控制面板: {SERVER_DETAIL_URL}")
+                await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(3)
+
+                # 3. 等待 React 异步加载服务器控制面板数据
                 print("⏳ 正在等待 React 异步加载服务器控制面板数据...")
                 try:
-                    await page.locator("text=유통기한").wait_for(state="visible", timeout=15000)
+                    await page.locator("text=유통기한").wait_for(state="visible", timeout=20000)
                     print("✅ 服务器面板数据已成功渲染加载！")
                 except Exception as e:
-                    print(f"⚠️ 等待到期时间文本超时，正在保存调试截图 'weirdhost_debug.png': {e}")
+                    print(f"⚠️ 等待到期时间文本超时，保存调试截图 'weirdhost_debug.png': {e}")
                     await page.screenshot(path="weirdhost_debug.png", full_page=True)
-                    body_text = await page.inner_text("body")
-                    print(f"📄 当前页面文本摘要: {body_text[:300]}...")
-                    
-                    # 如果是因为 Cookie 突然过期导致的死循环，直接尝试重新登录一次
-                    if "로그인" in body_text or "Login" in body_text:
-                        print("⚠️ 页面显示未登录，尝试重新执行登录...")
-                        await perform_login()
-                        await page.goto(SERVER_DETAIL_URL, wait_until="domcontentloaded", timeout=60000)
-                        await page.locator("text=유통기한").wait_for(state="visible", timeout=15000)
-                    else:
-                        raise e
+                    raise e
 
                 print(f"✅ 当前所在页面 URL: {page.url}")
 
-                # 读取到期时间
+                # 4. 读取到期时间
                 body_content = await page.content()
                 expiry_match = re.search(r"유통기한\s*(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2})", body_content)
                 if expiry_match:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 寻找并点击 '연장하기' 按钮
+                # 5. 寻找并点击 '연장하기' 按钮
                 print("📄 正在寻找 '연장하기' 按钮...")
                 renew_btn = page.locator('button, a, div, span').filter(has_text="연장하기").first
                 
