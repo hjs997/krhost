@@ -284,23 +284,29 @@ class WeirdhostAutomation:
 
                 print(f"🔍 成功进入面板，当前 URL: {page.url}")
 
-                # 5. 点击左侧'서버'(服务器)菜单
-                print("🔍 进入服务器列表...")
-                server_menu = page.get_by_text("서버", exact=True).first
-                if await server_menu.count() > 0:
-                    await server_menu.wait_for(state="visible", timeout=10000)
-                    await server_menu.click()
+                # 5 & 6. 强力直达：直接搜寻并点击指向 /server/ 的控制面板链接
+                print("🔍 正在寻找并进入服务器控制面板...")
+                try:
+                    # 等待 React 渲染出服务器链接
+                    await page.wait_for_selector('a[href*="/server/"]', timeout=15000)
+                    server_link = page.locator('a[href*="/server/"]').first
+                    await server_link.click(force=True)
+                    print("🖱️ 已点击服务器链接，等待页面跳转到控制面板...")
+                    # 强力等待 URL 真正变成 /server/xxxxxx
+                    await page.wait_for_url("**/server/*", timeout=15000)
                     await asyncio.sleep(3)
+                except Exception as e:
+                    print(f"⚠️ 自动寻找服务器链接超时，尝试通过菜单进入: {e}")
+                    server_menu = page.get_by_text("서버", exact=True).first
+                    if await server_menu.count() > 0:
+                        await server_menu.click()
+                        await asyncio.sleep(2)
+                    server_item = page.locator('text="나의 무료 서버"').first
+                    if await server_item.count() > 0:
+                        await server_item.click()
+                        await asyncio.sleep(3)
 
-                # 6. 点击服务器条目进入控制面板
-                print("🖱️ 点击服务器条目...")
-                server_item = page.locator('text="나의 무료 서버"').first
-                if await server_item.count() > 0:
-                    await server_item.wait_for(state="visible", timeout=10000)
-                    await server_item.click()
-                    await asyncio.sleep(3)
-
-                print(f"✅ 成功到达服务器控制面板: {page.url}")
+                print(f"✅ 成功到达服务器控制面板，当前 URL: {page.url}")
 
                 # 7. 读取到期时间
                 body_content = await page.content()
@@ -309,8 +315,8 @@ class WeirdhostAutomation:
                     self.old_expiry_time = expiry_match.group(1).strip()
                     print(f"📅 当前服务器到期时间: {self.old_expiry_time}")
 
-                # 8. 检查续期限制逻辑与按钮点击（已针对 React SPA 增强等待与匹配）
-                if "연장할수있어요" in body_content or "후에" in body_content:
+                # 8. 检查续期限制逻辑与按钮点击（确保此时已在真正的服务器详情页）
+                if "연장할수있어요" in body_content and "후에" in body_content:
                     print("ℹ️ 尚未到可续期时间（必须在到期 2 天以内才可以续期）")
                     self.renewal_status = "Unexpired"
                     await page.screenshot(path="weirdhost_unexpired.png", full_page=True)
